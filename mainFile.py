@@ -1,12 +1,11 @@
 import csv
-from tkinter import Tk
-from tkinter.filedialog import askopenfilename
 from tkinter.filedialog import askdirectory
-TK_SILENCE_DEPRECATION=1
+from tkinter.filedialog import askopenfilename
+
+TK_SILENCE_DEPRECATION = 1
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-import time
-import os
+
 
 @dataclass
 class textFile:
@@ -15,7 +14,6 @@ class textFile:
     sentence_times: list[str] = field(default_factory=list)
     sentence_absolute_times: list[str] = field(default_factory=list)
     sentences: list[str] = field(default_factory=list)
-
 
     def audio_start_time_from_path(self, csvInput) -> None:
         day = int(csvInput[0:2])
@@ -63,14 +61,13 @@ class textFile:
             if match_found:
                 break
         return sentence_index_match, empatica_index_match
-    
-    
 
 
 @dataclass
 class empatica:
     path_temp: str
     path_eda: str
+    timeOffset: int
     starting_time: str = ''
     start_time_unix: float = 0
     list_length: int = 0
@@ -84,22 +81,20 @@ class empatica:
     temp_avg: list[float] = field(default_factory=list)
 
     def eda_extraction(self):
-        eda_data = []
-        skip_first = True
         with open(self.path_eda) as csv_file:
             csv_reader = csv.reader(csv_file, delimiter=',')
             counter = 0
             for row in csv_reader:
-                if (counter == 0):
+                if counter == 0:
                     empatica_start_time = row[0]
-                    empatica_start_time = float(empatica_start_time)
+                    empatica_start_time = float(empatica_start_time) + self.timeOffset
                     self.start_time_unix = empatica_start_time
                     timestamp = datetime.fromtimestamp(empatica_start_time)
                     converted_time = timestamp.strftime('%H:%M:%S')
                     self.starting_time = converted_time
-                    #print(f"Converted start time = {converted_time}")
-                    #greater than 1 because first data point is the time and second is the sampling rate then a 0 measurement
-                if (counter > 2):
+                    # print(f"Converted start time = {converted_time}")
+                    # greater than 1 because first data point is the time and second is the sampling rate then a 0 measurement
+                if counter > 2:
                     self.eda.append(float(row[0]))
 
                 if counter == 1:
@@ -119,7 +114,7 @@ class empatica:
         second = 1
         plus_time = timedelta(seconds=second)
         time_temp = datetime.fromtimestamp(self.start_time_unix)
-        
+
         start_time_from_string = str(time_temp.strftime('%H:%M:%S'))
 
         date_time_starting = datetime.strptime(start_time_from_string, '%H:%M:%S')
@@ -164,19 +159,16 @@ class empatica:
             if (empatica_gps_match_index + 1) == self.list_length:
                 self.end_of_list = True
 
-
     def write_available_Empatica(self, csv_data, feature, empatica_gps_match_index) -> tuple[list, int]:
 
         csv_data.append(self.eda_avg[empatica_gps_match_index])
         csv_data.append(self.temp_avg[empatica_gps_match_index])
-        
 
         feature.SetField("EDA (us)", self.eda_avg[empatica_gps_match_index])
         feature.SetField("Temp (C)", self.temp_avg[empatica_gps_match_index])
 
+        empatica_gps_match_index += 1
 
-        empatica_gps_match_index += 1  
-        
         return csv_data, feature, empatica_gps_match_index
 
     def no_empatica_to_save(self, csv_data) -> list:
@@ -184,29 +176,35 @@ class empatica:
         csv_data.append("N/A")
         return csv_data
 
-    
 
 print("Please select the text file with the sentences now:")
 
-txt_file_path = askopenfilename()
+txt_file_path = askopenfilename(title="Select your sentence transcription file")
+# Generating the dataclass and running necessary data extraction functions
 textFileData = textFile(path=txt_file_path)
 textFileData.getTimesAndSentences()
-# Testing things
-print(textFileData.start_time)
-print(textFileData.sentence_times)
-print(textFileData.sentences)
-
 textFileData.convertElapsedTimesToAbsolute()
-print(textFileData.sentence_absolute_times)
+
 
 # inputs from the empatica
 print("Now select the empatica eda file")
-eda_path = askopenfilename()
+eda_path = askopenfilename(title="Select the eda .csv file")
 print("Now select the empatica temp file")
-temp_path = askopenfilename()
+temp_path = askopenfilename(title="Select the temp .csv file")
+
+print("where do you want to save this file?: ")
+saveFilePath = askdirectory(title="Select the folder you wish to save the output file in")
+print("What would you like to name this file?: ")
+fileNameInput = input()
+
+print("Enter time value offset in seconds: ")
+try:
+    timeOffset = int(input())
+except ValueError:
+    timeOffset = 0
 
 # making the data class for all of the relevant empatica data
-Empatica = empatica(path_temp=temp_path, path_eda=eda_path)
+Empatica = empatica(path_temp=temp_path, path_eda=eda_path, timeOffset=timeOffset)
 Empatica.eda_extraction()
 Empatica.temperature_extraction()
 Empatica.data_averager()
@@ -215,29 +213,28 @@ Empatica.time_list_get()
 # Now finding the index for the first sentence spoken that overlaps with the eda data
 # The audio will always start first so the senteceindex match will be the starting poing for the overlaps
 sentence_index_match, empatica_index_match = textFileData.findOverlappingIndexes(Empatica.times)
-print(f"sentence index is: {sentence_index_match}\nempatica index match is: {empatica_index_match}\n")
 
-print("where do you want to save this file?: ")
-saveFilePath = askdirectory(title="Select the folder you wish to save the ouput file in")
-print(f"\n\nSave file path: {saveFilePath}\n\n")
-print("What would you like to name this file?: ")
-fileNameInput = input()
 
-data_writer = open(saveFilePath +  fileNameInput + '.csv', 'w', newline='')
+data_writer = open(saveFilePath + '/' + fileNameInput + '.csv', 'w', newline='')
 writer = csv.writer(data_writer)
 csv_titles = ['time', 'eda vals', 'temp vals', 'sentences']
 writer.writerow(csv_titles)
 
-def creatingNewCSV():
-    for empaticaIdx, e_time in enumerate  in Empatica.times:
-        row_to_write = []
 
-        row_to_write.append(e_time, Empatica.eda_avg[empaticaIdx], Empatica.temp_avg[empaticaIdx])
+def creatingNewCSV(sentence_idx):
+    for empaticaIdx, e_time in enumerate(Empatica.times):
+        row_to_write = [e_time, Empatica.eda_avg[empaticaIdx], Empatica.temp_avg[empaticaIdx]]
 
+        if e_time == textFileData.sentence_absolute_times[sentence_idx]:
+            row_to_write.append(textFileData.sentences[sentence_idx])
+            sentence_idx = sentence_idx + 1
         # this is all so far, wont need much else code really
-        
+
+        writer.writerow(row_to_write)
 
 
+creatingNewCSV(sentence_index_match)
 
-
-
+print(f"Output is saved to: {saveFilePath}")
+print("All done.\nPress enter to continue: ")
+input()
